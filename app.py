@@ -8,36 +8,64 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from pandas.api.types import is_numeric_dtype
 
-# 1) READ YOUR EXCEL
+# ------------ LOAD DATA ------------
+
 df = pd.read_excel("Hospital_Patient_Data.xlsx")
 df.columns = df.columns.str.strip()
 
-# 2) CHANGE THE LEFT SIDE STRINGS TO MATCH YOUR HEADERS
+def find_col(candidates_contains, required=True):
+    candidates_contains = [s.lower() for s in candidates_contains]
+    for col in df.columns:
+        name = col.lower()
+        if all(s in name for s in candidates_contains):
+            return col
+    if required:
+        raise ValueError(f"Column containing {candidates_contains} not found. Columns: {list(df.columns)}")
+    return None
+
+age_col = find_col(["age"])
+gender_col = find_col(["gender"])
+admin_col = find_col(["admin"], required=False)
+if admin_col is None:
+    admin_col = find_col(["admission"])
+
+ref_col = find_col(["referr"], required=False)
+if ref_col is None:
+    ref_col = find_col(["department"], required=False)
+
+wait_col = None
+for col in df.columns:
+    if "wait" in col.lower() and is_numeric_dtype(df[col]):
+        wait_col = col
+        break
+if wait_col is None:
+    raise ValueError("Waiting time column not found (needs 'wait' in name and numeric type).")
+
 rename_map = {
-    "YOUR_AGE_COLUMN": "Age",
-    "YOUR_GENDER_COLUMN": "Gender",
-    "YOUR_ADMIN_TYPE_COLUMN": "AdminType",
-    "YOUR_REFERRAL_DEPT_COLUMN": "ReferralDept",
-    "YOUR_WAITING_TIME_COLUMN": "WaitingTime"
+    age_col: "Age",
+    gender_col: "Gender",
+    admin_col: "AdminType",
+    wait_col: "WaitingTime",
 }
+if ref_col is not None:
+    rename_map[ref_col] = "ReferralDept"
 
 df = df.rename(columns=rename_map)
 
-# 3) DROP ROWS WITHOUT WAITING TIME
 df = df.dropna(subset=["WaitingTime"])
 
-# 4) EXCLUDE PATIENT ID + SATISFACTION COLUMNS
+# drop satisfaction + patient id from being used
 excluded = []
 for col in df.columns:
     name = col.lower()
-    if "patient" in name or "satisfaction" in name:
+    if "satisfaction" in name or "patient" in name:
         excluded.append(col)
 
 base_features = ["Age", "Gender", "AdminType", "ReferralDept"]
 feature_cols = [c for c in base_features if c in df.columns and c not in excluded]
 
 if not feature_cols:
-    raise ValueError("No usable feature columns found. Check rename_map and column names.")
+    raise ValueError("No usable feature columns found. Check that Age, Gender, Admin, Referral Dept exist.")
 
 X = df[feature_cols]
 y = df["WaitingTime"]
@@ -61,20 +89,25 @@ model = Pipeline([
     ("regressor", RandomForestRegressor(n_estimators=300, random_state=42)),
 ])
 
-# we can train on the full data (no need for split just for deployment)
 model.fit(X, y)
 
 gender_values = sorted(df["Gender"].dropna().unique().tolist()) if "Gender" in df.columns else []
 admin_values = sorted(df["AdminType"].dropna().unique().tolist()) if "AdminType" in df.columns else []
 ref_values = sorted(df["ReferralDept"].dropna().unique().tolist()) if "ReferralDept" in df.columns else []
 
+# ------------ STREAMLIT UI ------------
+
 st.set_page_config(page_title="Hospital Waiting Time Predictor", layout="wide")
 
 st.markdown(
     """
-    <div style="background:#eaf3ff;padding:20px;border-radius:12px;text-align:center">
-        <h2 style="color:#1f4f80;margin-bottom:4px">Hospital Management Dashboard</h2>
-        <p style="color:#4f7fb3;margin:0">Predictive Waiting Time System</p>
+    <div style="background:#eaf3ff;padding:20px;border-radius:12px;
+                display:flex;align-items:center;gap:12px;justify-content:center">
+        <div style="font-size:32px;">🏥</div>
+        <div>
+            <h2 style="color:#1f4f80;margin:0;">Hospital Management Dashboard</h2>
+            <p style="color:#4f7fb3;margin:0;">Predictive Waiting Time System</p>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -92,8 +125,11 @@ with col1:
         unsafe_allow_html=True,
     )
 
+    patient_id = st.text_input("Patient ID (dummy, not used)", value="")
+
     age = st.number_input("Age", min_value=0, max_value=120, value=30)
-    visit_hour = st.number_input("Visit Time (Hour 0–23 – dummy)", min_value=0, max_value=23, value=10)
+
+    visit_hour = st.number_input("Visiting Hour (0–23, dummy)", min_value=0, max_value=23, value=10)
 
     if gender_values:
         gender = st.selectbox("Gender", gender_values)
