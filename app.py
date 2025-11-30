@@ -33,6 +33,9 @@ ref_col = find_col(["referr"], required=False)
 if ref_col is None:
     ref_col = find_col(["department"], required=False)
 
+# optional: patient id column
+patient_id_col = find_col(["patient"], required=False)
+
 wait_col = None
 for col in df.columns:
     if "wait" in col.lower() and is_numeric_dtype(df[col]):
@@ -49,20 +52,16 @@ rename_map = {
 }
 if ref_col is not None:
     rename_map[ref_col] = "ReferralDept"
+if patient_id_col is not None:
+    rename_map[patient_id_col] = "PatientID"
 
 df = df.rename(columns=rename_map)
-
 df = df.dropna(subset=["WaitingTime"])
 
-# drop satisfaction + patient id from being used
-excluded = []
-for col in df.columns:
-    name = col.lower()
-    if "satisfaction" in name or "patient" in name:
-        excluded.append(col)
+# ------------ FEATURES FOR MODEL (NO PATIENT ID, NO SATISFACTION) ------------
 
 base_features = ["Age", "Gender", "AdminType", "ReferralDept"]
-feature_cols = [c for c in base_features if c in df.columns and c not in excluded]
+feature_cols = [c for c in base_features if c in df.columns]
 
 if not feature_cols:
     raise ValueError("No usable feature columns found. Check that Age, Gender, Admin, Referral Dept exist.")
@@ -94,6 +93,7 @@ model.fit(X, y)
 gender_values = sorted(df["Gender"].dropna().unique().tolist()) if "Gender" in df.columns else []
 admin_values = sorted(df["AdminType"].dropna().unique().tolist()) if "AdminType" in df.columns else []
 ref_values = sorted(df["ReferralDept"].dropna().unique().tolist()) if "ReferralDept" in df.columns else []
+patient_ids = sorted(df["PatientID"].dropna().unique().tolist()) if "PatientID" in df.columns else []
 
 # ------------ STREAMLIT UI ------------
 
@@ -125,11 +125,14 @@ with col1:
         unsafe_allow_html=True,
     )
 
-    patient_id = st.text_input("Patient ID (dummy, not used)", value="")
+    if patient_ids:
+        patient_id = st.selectbox("Patient ID", patient_ids)
+    else:
+        patient_id = st.text_input("Patient ID")
 
     age = st.number_input("Age", min_value=0, max_value=120, value=30)
 
-    visit_hour = st.number_input("Visiting Hour (0–23, dummy)", min_value=0, max_value=23, value=10)
+    visiting_hour = st.number_input("Visiting Hour (0–23)", min_value=0, max_value=23, value=10)
 
     if gender_values:
         gender = st.selectbox("Gender", gender_values)
